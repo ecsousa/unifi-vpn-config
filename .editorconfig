@@ -1,0 +1,21 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+continuation_indent_size = 4
+
+[*.java]
+ij_java_continuation_indent_size = 4
+ij_java_align_multiline_parameters = false
+ij_java_align_multiline_parameters_in_calls = false
+ij_java_align_multiline_chained_methods = false
+ij_java_align_multiline_binary_operation = false
+ij_java_align_multiline_assignment = false
+ij_java_align_multiline_ternary_operation = false
+ij_java_align_multiline_throws_list = false
+ij_java_align_multiline_extends_list = false
+ij_java_align_multiline_array_initializer_expression = false
+ij_java_align_multiline_for = false
+ij_java_align_multiline_records = false
+ij_java_align_group_field_declarations = false
