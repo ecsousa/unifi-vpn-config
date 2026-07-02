@@ -1,6 +1,7 @@
 package net.ecsousa.unifivpn.service
 
 import kotlinx.coroutines.reactor.awaitSingle
+import net.ecsousa.unifivpn.exception.ResourceNotFoundException
 import net.ecsousa.unifivpn.model.MullvadRelay
 import net.ecsousa.unifivpn.model.mullvad.MullvadRelaysResponse
 import org.slf4j.LoggerFactory
@@ -43,7 +44,7 @@ class MullvadService(
             }
     }
 
-    suspend fun getServer(name: String): MullvadRelay? {
+    suspend fun getServer(name: String): MullvadRelay {
         return cachedRelaysMono
             .awaitSingle()
             .wireguard.relays
@@ -55,6 +56,7 @@ class MullvadService(
                     location = it.location,
                 )
             }
+            ?: throw ResourceNotFoundException("mullvadRelay", name)
     }
 
 }

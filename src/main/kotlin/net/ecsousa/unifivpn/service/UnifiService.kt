@@ -1,7 +1,11 @@
 package net.ecsousa.unifivpn.service
 
 import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.reactor.mono
 import net.ecsousa.unifivpn.config.AppConfig
+import net.ecsousa.unifivpn.exception.LoginFailedException
+import net.ecsousa.unifivpn.exception.ResourceNotFoundException
 import net.ecsousa.unifivpn.model.MullvadRelay
 import net.ecsousa.unifivpn.model.unifi.LoginRequest
 import net.ecsousa.unifivpn.model.unifi.UnifiEnvelope
@@ -10,7 +14,6 @@ import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
-import reactor.core.publisher.Mono
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.node.ObjectNode
 import java.time.Duration
@@ -30,13 +33,22 @@ class UnifiService(
             username = appConfig.unifiUsername,
             password = appConfig.unifiPassword,
         ))
-        .exchangeToMono {
-            if(it.statusCode().is2xxSuccessful) {
-                val csrf = it.headers().header("X-CSRF-Token").firstOrNull()
-                Mono.just(it.cookies() to csrf)
+        .exchangeToMono { response ->
+            if(response.statusCode().is2xxSuccessful) {
+                val csrf = response.headers().header("X-CSRF-Token").firstOrNull()
+
+                response.releaseBody()
+                    .thenReturn(response.cookies() to csrf)
             }
             else {
-                Mono.error(RuntimeException("Login failed"))
+                mono {
+                    throw LoginFailedException(
+                        "unifi",
+                        response.statusCode(),
+                        response.bodyToMono<String>()
+                            .awaitSingleOrNull()
+                    )
+                }
             }
         }
         .retryWhen(reactor.util.retry.Retry.backoff(3, Duration.ofSeconds(2)))
@@ -56,13 +68,13 @@ class UnifiService(
                 }
             }
             .apply {
-                if (csrf != null) {
-                    header("X-CSRF-Token", csrf)
+                csrf?.let {
+                    header("X-CSRF-Token", it)
                 }
             }
     }
 
-    suspend fun <S: WebClient.RequestHeadersSpec<S>> WebClient.UriSpec<S>.getNetworkConfUri(id: String? = null): S {
+    private fun <S: WebClient.RequestHeadersSpec<S>> WebClient.UriSpec<S>.getNetworkConfUri(id: String? = null): S {
         return this.uri { it.path("/proxy/network/api/s/default/rest/networkconf/${id ?: ""}").build() }
     }
 
@@ -78,7 +90,7 @@ class UnifiService(
             .data
     }
 
-    suspend fun getNetworkConfig(id: String): JsonNode? {
+    suspend fun getNetworkConfig(id: String): JsonNode {
 
         return unifiClient
             .get()
@@ -89,22 +101,23 @@ class UnifiService(
             .awaitSingle()
             .data
             .firstOrNull()
+            ?: throw ResourceNotFoundException("networkConfig", id)
     }
 
     suspend fun setVpnClientServer(id: String, serverName: String) {
-        val relay = mullvadService.getServer(serverName) ?: error("Could not find mullvad relay '$serverName'")
+        val relay = mullvadService.getServer(serverName)
 
         when(val node = getNetworkConfig(id)) {
             is ObjectNode -> {
                 setVpnClientServer(id, node, relay)
             }
-            null -> error("Could not find vpn-client '$id'")
+
             else -> error("Unexpected json node type: ${node.javaClass.canonicalName}")
         }
 
     }
 
-    suspend fun setVpnClientServer(id: String, node: ObjectNode, relay: MullvadRelay) {
+    private suspend fun setVpnClientServer(id: String, node: ObjectNode, relay: MullvadRelay) {
         node.put("wireguard_client_peer_ip", relay.hostname)
         node.put("wireguard_client_peer_public_key", relay.publicKey)
 
@@ -118,6 +131,5 @@ class UnifiService(
             .doOnError { log.error("Failed to update VPN client server (id: {}). Payload: {}", id, node, it) }
             .awaitSingle()
     }
-
 
 }

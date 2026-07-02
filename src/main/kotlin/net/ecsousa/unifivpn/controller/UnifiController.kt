@@ -1,9 +1,7 @@
 package net.ecsousa.unifivpn.controller
 
 import net.ecsousa.unifivpn.model.SetVpnServerRequest
-import net.ecsousa.unifivpn.model.unifi.NetworkConfig
 import net.ecsousa.unifivpn.service.UnifiService
-import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PutMapping
@@ -21,7 +19,7 @@ class UnifiController(
     @GetMapping("/vpn-client/{id}")
     suspend fun getVpnClient(
         @PathVariable id: String,
-    ): JsonNode? {
+    ): JsonNode {
         return unifiService.getNetworkConfig(id)
     }
 
