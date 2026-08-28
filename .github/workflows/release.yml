@@ -85,6 +85,7 @@ jobs:
         files: ${{ matrix.name }}
 
   build-docker:
+    needs: build-binaries
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -92,6 +93,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download Linux x64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: unifi-vpn-config-linux-x64
+          path: bin-dl/x64
+
+      - name: Download Linux arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: unifi-vpn-config-linux-arm64
+          path: bin-dl/arm64
+
+      - name: Prepare binaries for Docker build
+        run: |
+          mkdir -p bin
+          cp bin-dl/x64/unifi-vpn-config-linux-x64 bin/unifi-vpn-config-amd64
+          cp bin-dl/arm64/unifi-vpn-config-linux-arm64 bin/unifi-vpn-config-arm64
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -121,6 +140,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: Dockerfile.release
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}

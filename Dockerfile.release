@@ -1,0 +1,14 @@
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+ARG TARGETARCH
+COPY bin/unifi-vpn-config-${TARGETARCH} /app/unifi-vpn-config
+RUN chmod +x /app/unifi-vpn-config
+
+ENV PORT=8080
+ENV UNIFI_USERNAME=""
+ENV UNIFI_BASEURL=""
+
+EXPOSE 8080
+ENTRYPOINT ["/app/unifi-vpn-config"]
