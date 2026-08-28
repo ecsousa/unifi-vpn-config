@@ -10,17 +10,9 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDEs
-.idea/
-.vscode/
-*.swp
-*.swo
-*.sublime-project
-*.sublime-workspace
+# Rust
+target/
+**/*.rs.bk
 
 # Logs
 *.log
@@ -29,8 +21,5 @@ Thumbs.db
 .docker/
 .antigravitycli
 
-# Gradle
-.gradle/
-build/
-
+# Environment variables
 .env

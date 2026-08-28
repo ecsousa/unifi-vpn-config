@@ -1,19 +1,12 @@
-# Stage 1: Build Backend
-FROM eclipse-temurin:25-jdk AS backend-builder
+FROM rust:1.80 AS builder
 WORKDIR /app
+COPY . .
+RUN cargo build --release
 
-COPY ./ ./
-RUN chmod +x gradlew
-RUN ./gradlew copyAgent
-ARG APP_VERSION="0.1"
-RUN ./gradlew build -x test -PreleaseVersion=$APP_VERSION
-
-# Stage 2: Final Image
-FROM eclipse-temurin:25-jre
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=backend-builder /app/build/agent/*.jar /app/reactor-tools.jar
-ARG APP_VERSION="0.1"
-COPY --from=backend-builder /app/build/libs/unifi-vpn-config-${APP_VERSION}.jar app.jar
+COPY --from=builder /app/target/release/unifi-vpn-config /app/unifi-vpn-config
 
 ENV PORT=8080
 ENV UNIFI_USERNAME=""
@@ -21,4 +14,4 @@ ENV UNIFI_PASSWORD=""
 ENV UNIFI_BASEURL=""
 
 EXPOSE 8080
-ENTRYPOINT ["java", "-javaagent:/app/reactor-tools.jar", "-jar", "app.jar"]
+ENTRYPOINT ["/app/unifi-vpn-config"]

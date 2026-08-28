@@ -1,4 +1,0 @@
-unifi-vpn:
-    unifi-username: ${UNIFI_USERNAME}
-    unifi-password: ${UNIFI_PASSWORD}
-    unifi-baseUrl: ${UNIFI_BASEURL}
