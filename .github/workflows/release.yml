@@ -57,7 +57,7 @@ jobs:
       run: cargo install cross
 
     - name: Build
-      if: !matrix.use-cross
+      if: matrix.use-cross == false
       run: cargo build --release --target ${{ matrix.target }}
 
     - name: Build with cross
