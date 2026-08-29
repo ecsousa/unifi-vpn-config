@@ -3,31 +3,33 @@ use crate::error::AppError;
 use crate::models::unifi::{LoginRequest, UnifiEnvelope};
 use crate::services::mullvad::MullvadService;
 use moka::future::Cache;
-use reqwest::{cookie::Jar, Client};
+use reqwest::Client;
 use serde_json::{json, Value};
-use std::sync::Arc;
 use std::time::Duration;
+
+#[derive(Clone, Debug)]
+pub struct UnifiSession {
+    pub csrf: String,
+    pub cookies: String,
+}
 
 #[derive(Clone)]
 pub struct UnifiService {
     config: AppConfig,
     client: Client,
     mullvad_service: MullvadService,
-    cookie_jar: Arc<Jar>,
-    csrf_cache: Cache<String, String>,
+    session_cache: Cache<String, UnifiSession>,
 }
 
 impl UnifiService {
     pub fn new(config: AppConfig, mullvad_service: MullvadService) -> Self {
-        let cookie_jar = Arc::new(Jar::default());
         let client = Client::builder()
-            .cookie_provider(cookie_jar.clone())
             .timeout(Duration::from_secs(10))
             .danger_accept_invalid_certs(true) // Unifi often uses self-signed
             .build()
             .unwrap();
 
-        let csrf_cache = Cache::builder()
+        let session_cache = Cache::builder()
             .time_to_live(Duration::from_secs(5 * 60))
             .build();
 
@@ -35,15 +37,14 @@ impl UnifiService {
             config,
             client,
             mullvad_service,
-            cookie_jar,
-            csrf_cache,
+            session_cache,
         }
     }
 
-    async fn login(&self) -> Result<String, AppError> {
-        if let Some(csrf) = self.csrf_cache.get("csrf").await {
-            tracing::debug!("Using cached CSRF token");
-            return Ok(csrf);
+    async fn login(&self) -> Result<UnifiSession, AppError> {
+        if let Some(session) = self.session_cache.get("session").await {
+            tracing::debug!("Using cached Unifi session");
+            return Ok(session);
         }
 
         let login_url = format!("{}/api/auth/login", self.config.unifi_base_url);
@@ -89,13 +90,19 @@ impl UnifiService {
 
                 tracing::debug!("Extracted CSRF token: {}", csrf);
 
-                let cookies: Vec<_> = resp.cookies().collect();
-                tracing::debug!("Response cookies: {:?}", cookies);
+                let mut cookie_parts = Vec::new();
+                for cookie in resp.cookies() {
+                    cookie_parts.push(format!("{}={}", cookie.name(), cookie.value()));
+                }
+                let cookies = cookie_parts.join("; ");
+                tracing::debug!("Extracted Cookies: {}", cookies);
 
-                self.csrf_cache
-                    .insert("csrf".to_string(), csrf.clone())
+                let session = UnifiSession { csrf, cookies };
+                self.session_cache
+                    .insert("session".to_string(), session.clone())
                     .await;
-                Ok(csrf)
+
+                Ok(session)
             }
             Err(err) => {
                 tracing::error!("Unifi login request error: {}", err);
@@ -113,12 +120,15 @@ impl UnifiService {
     }
 
     pub async fn get_network_configs(&self) -> Result<Vec<Value>, AppError> {
-        let csrf = self.login().await?;
+        let session = self.login().await?;
         let url = self.get_network_conf_url(None).await;
 
         let mut req = self.client.get(&url);
-        if !csrf.is_empty() {
-            req = req.header("X-CSRF-Token", &csrf);
+        if !session.csrf.is_empty() {
+            req = req.header("X-CSRF-Token", &session.csrf);
+        }
+        if !session.cookies.is_empty() {
+            req = req.header(reqwest::header::COOKIE, &session.cookies);
         }
 
         let env: UnifiEnvelope<Value> = req.send().await?.json().await?;
@@ -126,12 +136,15 @@ impl UnifiService {
     }
 
     pub async fn get_network_config(&self, id: &str) -> Result<Value, AppError> {
-        let csrf = self.login().await?;
+        let session = self.login().await?;
         let url = self.get_network_conf_url(Some(id)).await;
 
         let mut req = self.client.get(&url);
-        if !csrf.is_empty() {
-            req = req.header("X-CSRF-Token", &csrf);
+        if !session.csrf.is_empty() {
+            req = req.header("X-CSRF-Token", &session.csrf);
+        }
+        if !session.cookies.is_empty() {
+            req = req.header(reqwest::header::COOKIE, &session.cookies);
         }
 
         let env: UnifiEnvelope<Value> = req.send().await?.json().await?;
@@ -162,12 +175,15 @@ impl UnifiService {
             );
         }
 
-        let csrf = self.login().await?;
+        let session = self.login().await?;
         let url = self.get_network_conf_url(Some(id)).await;
 
         let mut req = self.client.put(&url).json(&node);
-        if !csrf.is_empty() {
-            req = req.header("X-CSRF-Token", &csrf);
+        if !session.csrf.is_empty() {
+            req = req.header("X-CSRF-Token", &session.csrf);
+        }
+        if !session.cookies.is_empty() {
+            req = req.header(reqwest::header::COOKIE, &session.cookies);
         }
 
         let resp = req.send().await?;
