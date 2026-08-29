@@ -18,7 +18,7 @@ async fn main() {
 
     let config = AppConfig::from_env();
     let port = config.port;
-    
+
     let mullvad_service = MullvadService::new();
     let unifi_service = UnifiService::new(config, mullvad_service.clone());
 
@@ -27,11 +27,11 @@ async fn main() {
         unifi_service,
     };
 
-    let app = create_router(state);
+    let app = create_router(state).layer(tower_http::trace::TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Listening on {}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

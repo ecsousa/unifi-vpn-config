@@ -28,16 +28,12 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, type_, message) = match &self {
-            AppError::ResourceNotFound { .. } => (
-                StatusCode::NOT_FOUND,
-                "notFound",
-                self.to_string(),
-            ),
-            AppError::LoginFailed { .. } => (
-                StatusCode::NOT_FOUND,
-                "loginFailed",
-                self.to_string(),
-            ),
+            AppError::ResourceNotFound { .. } => {
+                (StatusCode::NOT_FOUND, "notFound", self.to_string())
+            }
+            AppError::LoginFailed { .. } => {
+                (StatusCode::NOT_FOUND, "loginFailed", self.to_string())
+            }
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internalError",
