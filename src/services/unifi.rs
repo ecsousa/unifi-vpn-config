@@ -25,7 +25,6 @@ impl UnifiService {
     pub fn new(config: AppConfig, mullvad_service: MullvadService) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
-            .danger_accept_invalid_certs(true) // Unifi often uses self-signed
             .build()
             .unwrap();
 
