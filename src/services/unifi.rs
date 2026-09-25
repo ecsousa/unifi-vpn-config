@@ -1,24 +1,16 @@
 use crate::config::AppConfig;
 use crate::error::AppError;
-use crate::models::unifi::{LoginRequest, UnifiEnvelope};
+use crate::models::unifi::UnifiEnvelope;
 use crate::services::mullvad::MullvadService;
-use moka::future::Cache;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::time::Duration;
-
-#[derive(Clone, Debug)]
-pub struct UnifiSession {
-    pub csrf: String,
-    pub cookies: String,
-}
 
 #[derive(Clone)]
 pub struct UnifiService {
     config: AppConfig,
     client: Client,
     mullvad_service: MullvadService,
-    session_cache: Cache<String, UnifiSession>,
 }
 
 impl UnifiService {
@@ -28,85 +20,10 @@ impl UnifiService {
             .build()
             .unwrap();
 
-        let session_cache = Cache::builder()
-            .time_to_live(Duration::from_secs(5 * 60))
-            .build();
-
         Self {
             config,
             client,
             mullvad_service,
-            session_cache,
-        }
-    }
-
-    async fn login(&self) -> Result<UnifiSession, AppError> {
-        if let Some(session) = self.session_cache.get("session").await {
-            tracing::debug!("Using cached Unifi session");
-            return Ok(session);
-        }
-
-        let login_url = format!("{}/api/auth/login", self.config.unifi_base_url);
-        let req_body = LoginRequest {
-            username: self.config.unifi_username.clone(),
-            password: self.config.unifi_password.clone(),
-            remember_me: false,
-            token: "".to_string(),
-        };
-
-        tracing::info!("Attempting login to Unifi at {}", login_url);
-        tracing::debug!(
-            "Login request body: username={}, remember_me={}, token={}",
-            req_body.username,
-            req_body.remember_me,
-            req_body.token
-        );
-
-        let resp = self.client.post(&login_url).json(&req_body).send().await;
-
-        match resp {
-            Ok(resp) => {
-                let status = resp.status();
-                tracing::info!("Unifi login responded with status: {}", status);
-                tracing::debug!("Response headers: {:?}", resp.headers());
-
-                if !status.is_success() {
-                    let body = resp.text().await.unwrap_or_default();
-                    tracing::error!("Unifi login failed. Status: {}, Body: {}", status, body);
-                    return Err(AppError::LoginFailed {
-                        provider: "unifi".to_string(),
-                        status_code: status.as_u16(),
-                        message: body,
-                    });
-                }
-
-                let csrf = resp
-                    .headers()
-                    .get("X-CSRF-Token")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or_default()
-                    .to_string();
-
-                tracing::debug!("Extracted CSRF token: {}", csrf);
-
-                let mut cookie_parts = Vec::new();
-                for cookie in resp.cookies() {
-                    cookie_parts.push(format!("{}={}", cookie.name(), cookie.value()));
-                }
-                let cookies = cookie_parts.join("; ");
-                tracing::debug!("Extracted Cookies: {}", cookies);
-
-                let session = UnifiSession { csrf, cookies };
-                self.session_cache
-                    .insert("session".to_string(), session.clone())
-                    .await;
-
-                Ok(session)
-            }
-            Err(err) => {
-                tracing::error!("Unifi login request error: {}", err);
-                Err(AppError::InternalError(format!("Request failed: {}", err)))
-            }
         }
     }
 
@@ -119,34 +36,36 @@ impl UnifiService {
     }
 
     pub async fn get_network_configs(&self) -> Result<Vec<Value>, AppError> {
-        let session = self.login().await?;
         let url = self.get_network_conf_url(None).await;
 
         let mut req = self.client.get(&url);
-        if !session.csrf.is_empty() {
-            req = req.header("X-CSRF-Token", &session.csrf);
-        }
-        if !session.cookies.is_empty() {
-            req = req.header(reqwest::header::COOKIE, &session.cookies);
+        req = req.header("X-API-KEY", &self.config.unifi_apikey);
+
+        let resp = req.send().await?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::UnifiUnauthorized);
+        } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AppError::UnifiForbidden);
         }
 
-        let env: UnifiEnvelope<Value> = req.send().await?.json().await?;
+        let env: UnifiEnvelope<Value> = resp.json().await?;
         Ok(env.data)
     }
 
     pub async fn get_network_config(&self, id: &str) -> Result<Value, AppError> {
-        let session = self.login().await?;
         let url = self.get_network_conf_url(Some(id)).await;
 
         let mut req = self.client.get(&url);
-        if !session.csrf.is_empty() {
-            req = req.header("X-CSRF-Token", &session.csrf);
-        }
-        if !session.cookies.is_empty() {
-            req = req.header(reqwest::header::COOKIE, &session.cookies);
+        req = req.header("X-API-KEY", &self.config.unifi_apikey);
+
+        let resp = req.send().await?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::UnifiUnauthorized);
+        } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AppError::UnifiForbidden);
         }
 
-        let env: UnifiEnvelope<Value> = req.send().await?.json().await?;
+        let env: UnifiEnvelope<Value> = resp.json().await?;
         env.data
             .into_iter()
             .next()
@@ -174,20 +93,20 @@ impl UnifiService {
             );
         }
 
-        let session = self.login().await?;
         let url = self.get_network_conf_url(Some(id)).await;
 
         let mut req = self.client.put(&url).json(&node);
-        if !session.csrf.is_empty() {
-            req = req.header("X-CSRF-Token", &session.csrf);
-        }
-        if !session.cookies.is_empty() {
-            req = req.header(reqwest::header::COOKIE, &session.cookies);
-        }
+        req = req.header("X-API-KEY", &self.config.unifi_apikey);
 
         let resp = req.send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(AppError::UnifiUnauthorized);
+            } else if status == reqwest::StatusCode::FORBIDDEN {
+                return Err(AppError::UnifiForbidden);
+            }
+
             let body = resp.text().await.unwrap_or_default();
             tracing::error!("Failed to update VPN client server (id: {}): {}", id, body);
             return Err(AppError::InternalError(format!(

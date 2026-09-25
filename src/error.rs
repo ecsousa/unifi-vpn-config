@@ -13,12 +13,10 @@ pub enum AppError {
         resource_type: String,
         resource_id: String,
     },
-    #[error("Login failed at {provider} (code {status_code}): {message}")]
-    LoginFailed {
-        provider: String,
-        status_code: u16,
-        message: String,
-    },
+    #[error("Unauthorized access to Unifi")]
+    UnifiUnauthorized,
+    #[error("Forbidden access to Unifi")]
+    UnifiForbidden,
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
     #[error("Internal Server Error: {0}")]
@@ -31,8 +29,11 @@ impl IntoResponse for AppError {
             AppError::ResourceNotFound { .. } => {
                 (StatusCode::NOT_FOUND, "notFound", self.to_string())
             }
-            AppError::LoginFailed { .. } => {
-                (StatusCode::NOT_FOUND, "loginFailed", self.to_string())
+            AppError::UnifiUnauthorized => {
+                (StatusCode::UNAUTHORIZED, "unauthorized", self.to_string())
+            }
+            AppError::UnifiForbidden => {
+                (StatusCode::FORBIDDEN, "forbidden", self.to_string())
             }
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
